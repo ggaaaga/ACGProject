@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createWaterMaterial } from './shaders/water.js';
 import { createSunAndMoon } from './sunAndMoon.js'; // Import the sun and moon module
 import { createGrassTexture } from './shaders/grass.js'; // Import the texture function
+import { vertexShaderSrc, fragmentShaderSrc, fragmentShaderSrc2 } from './shaders.js';
 
 let waterTime = 0;
 
@@ -34,10 +35,7 @@ document.body.appendChild(renderer.domElement);
 const sunLight = new THREE.DirectionalLight(0xffffff, 2);
 sunLight.position.set(5, 10, 5);
 sunLight.castShadow = true;
-// Add helper to visualize the light source
-const sunLightHelper = new THREE.DirectionalLightHelper(sunLight, 1);
-//scene.add(sunLightHelper);
-scene.add(sunLight);
+
 // Configure Sun shadow properties
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
@@ -54,10 +52,8 @@ const moonLight = new THREE.DirectionalLight(0x8888ff, 1); // Dim bluish light
 moonLight.position.set(5, 10, 5);
 moonLight.castShadow = true;
 moonLight.shadow.bias = -0.001; // Reduce shadow acne
-// Add helper to visualize the light source
-const moonLightHelper = new THREE.DirectionalLightHelper(moonLight, 1);
-//scene.add(moonLightHelper);
 scene.add(moonLight);
+
 // Configure Moon shadow properties
 moonLight.shadow.mapSize.width = 2048;
 moonLight.shadow.mapSize.height = 2048;
@@ -70,12 +66,8 @@ moonLight.shadow.camera.bottom = -10;
 moonLight.shadow.bias = -0.001;
 
 // Ambient light
-const ambientLight = new THREE.AmbientLight(0x404040, 3); // Soft neutral light
+const ambientLight = new THREE.AmbientLight(0x404040, 5); // Soft neutral light
 scene.add(ambientLight);
-
-// Hemisphere light
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.1); // Soft white light
-scene.add(hemiLight);
 
 // Lantern light
 const lanternLight = new THREE.PointLight(0xffa500, 0, 10); // Orange light
@@ -94,7 +86,6 @@ scene.add(lanternSphere);
 const lanternHelper = new THREE.PointLightHelper(lanternLight, 0.5); // Debug light helper
 //scene.add(lanternHelper);
 
-
 // ----------------------------------
 // OrbitControls for mouse interaction
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -105,9 +96,75 @@ controls.dampingFactor = 0.05;
 const loader = new GLTFLoader();
 let model;
 
-// Get the grass texture
-const texture = createGrassTexture();  // Use the function from grass.js
 
+// Get the grass texture
+const grassTexture = createGrassTexture();  // Use the function from grass.js
+
+// Create custom Phong Material for shading
+function createPhongMaterial(sunLight, moonLight, lanternLight, ambientLight, textureMap, spec, camera){
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      viewPosition: { value: camera.position },
+
+      cSun: { value: sunLight.color },
+      pSun: { value: sunLight.position },
+      cMoon: { value: moonLight.color },
+      pMoon: { value: moonLight.position },
+      cLantern: { value: lanternLight.color },
+      pLantern: { value: lanternLight.position },
+
+      cAmbient: { value: ambientLight.color },
+      texturee: { value: textureMap },
+      SpecularFactor: { value: spec },
+    },
+
+    vertexShader: vertexShaderSrc,
+    fragmentShader: fragmentShaderSrc,
+  });
+
+  material.needsUpdate = true;
+  return material;
+}
+
+
+// Create custom Phong Material for shading
+function createPhongMaterial2(sunLight, moonLight, lanternLight, ambientLight, spec, object, camera){
+  let r = object.material.color.r;
+  let g = object.material.color.g;
+  let b = object.material.color.b;
+
+  //Color correction for pond stones & the tree respectively (easier than editing model again)
+  if(r == g && g == b){
+    r = 0.24; g = 0.27; b = 0.27;
+  } else if (r > 0.8) {
+    r = 107/255; g = 73/255; b = 43/255;
+  }
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      viewPosition: { value: camera.position },
+
+      cSun: { value: sunLight.color },
+      pSun: { value: sunLight.position },
+      cMoon: { value: moonLight.color },
+      pMoon: { value: moonLight.position },
+      cLantern: { value: lanternLight.color },
+      pLantern: { value: lanternLight.position },
+
+      //Pass original color from imported model to shader
+      cObj: {value: new THREE.Vector3(r,g,b)},
+
+      cAmbient: { value: ambientLight.color },
+      SpecularFactor: { value: spec },
+    },
+
+    vertexShader: vertexShaderSrc,
+    fragmentShader: fragmentShaderSrc2,
+  });
+
+  material.needsUpdate = true;
+  return material;
+}
 
 loader.load('/Floating_Island.glb', async (gltf) => {
   model = gltf.scene;
@@ -116,21 +173,22 @@ loader.load('/Floating_Island.glb', async (gltf) => {
   model.position.set(0, 0, 0);
   model.rotation.set(0, 0, 0);
 
+  const phongMaterialGrass = createPhongMaterial(sunLight, moonLight, lanternLight, ambientLight, grassTexture, 1.0, camera);
   const waterMaterial = await createWaterMaterial();
 
   model.traverse((child) => {
-    console.log(child.name);
     if (child.isMesh && child.name === 'Vert001') {
       if (!child.geometry.attributes.uv) { console.log('No UVs found!'); }
-      child.material.map = texture; // Apply the texture to the material
-      child.material.needsUpdate = true;
-    } 
-    else if (child.isMesh && child.name === '柱体') {
+      child.material = phongMaterialGrass;
+
+    } else if (child.isMesh && child.name === '柱体') {
       child.material = waterMaterial;
       child.material.needsUpdate = true;
+
     } else if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
+      const phongMaterial = createPhongMaterial2(sunLight, moonLight, lanternLight, ambientLight, 1.0, child, camera);
+      console.log("Model: " + child.name + " Color:" + child.material.color.r + " "+ child.material.color.g + " "+ child.material.color.b);
+      child.material = phongMaterial;
     }
   });
 }, undefined, (error) => {
@@ -149,6 +207,7 @@ function animate() {
   // Update water shader's iTime uniform
   if (model) {
     model.traverse((child) => {
+
       if (child.isMesh && child.name === '柱体') {
         const deltaTime = performance.now() * 0.001;
         child.material.uniforms.iTime.value = deltaTime;
