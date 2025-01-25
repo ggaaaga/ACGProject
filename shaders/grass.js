@@ -44,5 +44,6 @@ export function createGrassTexture() {
         context.fill();
         context.restore();
     }
+    //return it as toon texture
     return new THREE.CanvasTexture(canvas);
 }
